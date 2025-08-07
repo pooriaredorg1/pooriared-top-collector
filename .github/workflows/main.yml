@@ -1,12 +1,12 @@
 name: Ultimate V2Ray Collector
 
-# این بخش جدید، دسترسی نوشتن را به اکشن می‌دهد
+# این بخش دسترسی نوشتن را به اکشن می‌دهد
 permissions:
   contents: write
 
 on:
   schedule:
-    # اجرا در دقیقه 0 هر 2 ساعت یک‌بار
+    # اجرا در دقیقه 0 هر 2 ساعت یک‌بار (می‌توانید به '0 * * * *' برای هر ساعت تغییر دهید)
     - cron: '0 */2 * * *'
   workflow_dispatch:
 
@@ -58,9 +58,11 @@ jobs:
             echo "New configs found. Committing files..."
             git config --local user.email "action@github.com"
             git config --local user.name "GitHub Action Bot"
-            git add sub.txt sub_base64.txt
+            # --- تغییر اصلی اینجاست ---
+            # فایل جدید به لیست کامیت اضافه شد
+            git add sub.txt sub_base64.txt final_sub_link.txt
             if ! git diff-index --quiet HEAD; then
-              git commit -m "✅ Configs updated at $(date -u)"
+              git commit -m "✅ Configs and link updated at $(date -u)"
               git push
             else
               echo "No changes to commit."
