@@ -19,7 +19,7 @@ SUBSCRIPTION_URLS = [
 ]
 PING_TEST_URL = "http://www.gstatic.com/generate_204"
 # ۲. زمان تایم‌اوت افزایش یافت
-REQUEST_TIMEOUT = 45
+REQUEST_TIMEOUT = 15
 # ۳. محدودیت کانفیگ نهایی
 MAX_FINAL_CONFIGS = 200
 # تعداد کارگرها برای تست سریع‌تر
