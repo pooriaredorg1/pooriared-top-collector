@@ -1,0 +1,70 @@
+name: Ultimate V2Ray Collector
+
+# این بخش جدید، دسترسی نوشتن را به اکشن می‌دهد
+permissions:
+  contents: write
+
+on:
+  schedule:
+    # اجرا در دقیقه 0 هر 2 ساعت یک‌بار
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # مرحله ۱: دریافت کد از مخزن
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # مرحله ۲: نصب پایتون
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      # مرحله ۳: نصب نیازمندی‌های پایتون
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # مرحله ۴: دانلود و آماده‌سازی Xray-core
+      - name: Download and Setup Xray-core
+        run: |
+          echo "Finding the precise Xray-core release URL..."
+          LATEST_URL=$(curl -s "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | jq -r '.assets[] | select(.name | endswith("linux-64.zip")) | .browser_download_url')
+          if [ -z "$LATEST_URL" ]; then
+            echo "::error::Could not find the download URL."
+            exit 1
+          fi
+          echo "Downloading from precise URL: $LATEST_URL"
+          curl -sL -o xray.zip "$LATEST_URL"
+          echo "Unzipping Xray..."
+          unzip -q xray.zip xray
+          chmod +x xray
+          echo "Xray is ready!"
+          ./xray --version
+
+      # مرحله ۵: اجرای اسکریپت اصلی جمع‌آوری کانفیگ
+      - name: Run The Collector Script
+        run: python collector.py
+
+      # مرحله ۶: کامیت و پوش کردن نتایج
+      - name: Commit and Push Results
+        run: |
+          if [ -f "sub.txt" ]; then
+            echo "New configs found. Committing files..."
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action Bot"
+            git add sub.txt sub_base64.txt
+            if ! git diff-index --quiet HEAD; then
+              git commit -m "✅ Configs updated at $(date -u)"
+              git push
+            else
+              echo "No changes to commit."
+            fi
+          else
+            echo "No working configs found in this run. Nothing to commit."
+          fi
