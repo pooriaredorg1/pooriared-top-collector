@@ -11,33 +11,32 @@ from urllib.parse import urlparse, unquote, quote, parse_qs, urlunparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Semaphore
 
-# --- تنظیمات اصلی ---
-# ۱. لیست لینک‌های اشتراک
+# --- تنظیمات اصلی (بهینه شده برای گرفتن تمام کانفیگ‌های سالم) ---
 SUBSCRIPTION_URLS = [
     "https://raw.githubusercontent.com/pooriaredorg1/pooria/refs/heads/main/configs/proxy_configs.txt#POORIA-mixpro%20pooriaredorg1",
     "https://raw.githubusercontent.com/V2RAYCONFIGSPOOL/V2RAY_SUB/refs/heads/main/v2ray_configs.txt"
 ]
-PING_TEST_URL = "http://www.gstatic.com/generate_204"
-# ۲. زمان تایم‌اوت افزایش یافت
-REQUEST_TIMEOUT = 15
-# ۳. محدودیت کانفیگ نهایی
-MAX_FINAL_CONFIGS = 200
-# تعداد کارگرها برای تست سریع‌تر
-MAX_WORKERS = 250
-# پیشوند نام کانفیگ‌ها
-TAG_PREFIX = "POORIA"
-# پورت شروع برای پراکسی SOCKS
+# ۱. استفاده از یک سرور تست جایگزین و قابل اعتماد
+PING_TEST_URL = "http://cp.cloudflare.com/"
+# ۲. افزایش چشمگیر زمان تایم‌اوت برای کانفیگ‌های کندتر
+REQUEST_TIMEOUT = 120
+# ۳. محدودیت کانفیگ نهایی (در صورت نیاز می‌توانید این را هم افزایش دهید)
+MAX_FINAL_CONFIGS = 500
+# ۴. کاهش تعداد تست‌های همزمان برای افزایش دقت
+MAX_WORKERS = 75
+# تگ‌های شما
+TAG_PREFIX = "POORIARED"
+SUBSCRIPTION_TAG = "POORIARED-topmix"
+# تنظیمات فنی
 BASE_SOCKS_PORT = 10800
-# مسیر فایل اجرایی Xray (بهبود ۱)
 XRAY_EXECUTABLE_PATH = './xray'
-# نام فایل‌های خروجی
 OUTPUT_FILE_NORMAL = "sub.txt"
 OUTPUT_FILE_BASE64 = "sub_base64.txt"
+OUTPUT_FINAL_LINK = "final_sub_link.txt"
 
 # --- تنظیمات لاگ و متغیرهای گلوبال ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ip_location_cache = {}
-# سمافور برای محدود کردن درخواست به API به حداکثر 5 عدد همزمان (بهبود ۲)
 geoip_api_semaphore = Semaphore(5)
 
 def get_geolocation(ip_address):
@@ -45,7 +44,7 @@ def get_geolocation(ip_address):
     if ip_address in ip_location_cache:
         return ip_location_cache[ip_address]
     
-    with geoip_api_semaphore: # قبل از ارسال درخواست، منتظر سمافور بمان
+    with geoip_api_semaphore:
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
             response = requests.get(f"http://ip-api.com/json/{ip_address}?fields=countryCode", timeout=10, headers=headers)
@@ -72,7 +71,6 @@ def fetch_subscription_content(url):
         response = requests.get(url, timeout=15)
         response.raise_for_status()
         content = response.text
-        # برخی لینک‌ها مستقیم هستند و برخی Base64
         decoded_content = decode_base64_content(content)
         return (decoded_content or content).splitlines()
     except requests.RequestException as e:
@@ -125,20 +123,21 @@ def test_config_with_xray(config, worker_id):
             json.dump(xray_json_config, f)
             
         xray_proc = subprocess.Popen([XRAY_EXECUTABLE_PATH, '-c', config_file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(0.5) # زمان کوتاه برای اطمینان از اجرای Xray
+        time.sleep(0.5)
         
         proxies = {'http': f'socks5://127.0.0.1:{local_port}', 'https': f'socks5://127.0.0.1:{local_port}'}
         start_time = time.time()
         response = requests.get(PING_TEST_URL, proxies=proxies, timeout=REQUEST_TIMEOUT)
         
-        if response.status_code == 204:
+        if response.status_code in [200, 204]:
             latency = int((time.time() - start_time) * 1000)
             server_ip = urlparse(config).hostname
             location = get_geolocation(server_ip)
             logging.info(f"✅ SUCCESS: {config[:40]}... | Ping: {latency}ms | Location: {location}")
             return {"config": config, "latency": latency, "location": location}
     except Exception as e:
-        logging.debug(f"❌ FAILED: {config[:40]}... | Error: {e}")
+        # لاگ کردن خطاها به جای دیباگ برای اینکه در خروجی اکشن دیده شوند
+        logging.info(f"❌ FAILED: {config[:40]}... | Error: {type(e).__name__}")
         return None
     finally:
         if xray_proc:
@@ -160,7 +159,6 @@ def rename_config(config, new_name):
             base_url = config.split("#")[0]
             return f"{base_url}#{quote(new_name)}"
     except Exception:
-        # در صورت بروز هرگونه خطا، فقط نام جدید را به انتهای لینک اضافه کن
         return f"{config.split('#')[0]}#{quote(new_name)}"
 
 def main():
@@ -208,12 +206,22 @@ def main():
         f.write(final_sub_base64)
         
     logging.info("\n" + "="*40)
-    logging.info("✅ Process finished successfully.")
+    logging.info("✅ Base subscription files created successfully.")
     logging.info(f"📄 Saved {len(final_configs_list)} configs to {OUTPUT_FILE_NORMAL} and {OUTPUT_FILE_BASE64}")
+    
+    repo_name = os.getenv("GITHUB_REPOSITORY")
+    if repo_name:
+        final_link = f"https://raw.githubusercontent.com/{repo_name}/main/{OUTPUT_FILE_BASE64}#{SUBSCRIPTION_TAG}"
+        with open(OUTPUT_FINAL_LINK, "w") as f:
+            f.write(final_link)
+        logging.info(f"🔗 Final subscription link saved to {OUTPUT_FINAL_LINK}")
+    else:
+        logging.warning("Could not determine repository name. Skipping final link generation.")
+    
     logging.info("="*40)
 
 if __name__ == "__main__":
     if not os.path.exists(XRAY_EXECUTABLE_PATH) and not os.path.exists(XRAY_EXECUTABLE_PATH + '.exe'):
-        logging.error("❌ Xray executable not found! This should be handled automatically in GitHub Actions.")
+        logging.error("❌ Xray executable not found! This should be handled by the GitHub Action.")
     else:
         main()
